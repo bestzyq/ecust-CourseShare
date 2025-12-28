@@ -40,6 +40,64 @@ master:
             # --- 推送 ---
             git push github master
             echo "🚀 已成功同步到 GitHub"
+        
+        - name: Check & Install Rclone
+          script: |
+            sed -i 's/deb.debian.org/mirrors.tencentyun.com/g' /etc/apt/sources.list.d/debian.sources
+            apt update
+            # 确保安装 curl
+            apt install unzip dnsutils curl -y
+            
+            # DNS 修正逻辑 (保留原样)
+            nslookup $WEBDAV_CNAME | grep 'Address:' | tail -n1 | awk -v host="$WEBDAV_HOST" '{print $2 " " host}' >> /etc/hosts
+            
+            # -------------------------------------------------------
+            # [新增] 状态码前置检查
+            # -------------------------------------------------------
+            echo "🔍 正在检查 WebDAV 连通性: $WEBDAV_URL"
+            
+            # 获取状态码 (--max-time 3 防止服务器无响应卡住)
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$WEBDAV_URL")
+            
+            if [ "$HTTP_CODE" != "401" ]; then
+              echo "⛔️ 检测到 WebDAV 状态码为: $HTTP_CODE"
+              echo "⚠️ 目标非 401 状态，停止后续任务以节省资源。"
+              exit 1  # 退出码 1 会强制终止 Pipeline，后续的 Sync Stage 不会执行
+            fi
+            
+            echo "✅ WebDAV 状态码为 401，服务正常，继续执行安装..."
+            # -------------------------------------------------------
+
+            curl https://cnb.cool/bestzyq/rclone/-/git/raw/main/install.sh | bash
+
+            echo "🧹 清理空文件和空目录..."
+            find . -type f -empty -not -path "./.git/*" -delete
+            while [ -n "$(find . -type d -empty -not -path "./.git" -not -path "./.git/*" -print -quit)" ]; do
+              find . -type d -empty -not -path "./.git" -not -path "./.git/*" -delete
+            done
+
+        - name: Rclone Sync to WebDAV
+          timeout: 12h
+          script: |
+            # 配置 Rclone WebDAV
+            rclone config create mycloud webdav url=$WEBDAV_URL vendor=other user=$WEBDAV_USER pass=$WEBDAV_PASSWORD
+            
+            # 开始同步
+            rclone sync . mycloud:$WEBDAV_PATH \
+              --exclude ".git/**" \
+              --exclude ".github/**" \
+              --transfers 8 \
+              --retries 3 \
+              --retries-sleep 5s \
+              --size-only \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            echo "✅ 已同步到webdav"
+
+            rclone check . mycloud:$WEBDAV_PATH \
+              --exclude ".git/**" \
+              --exclude ".github/**" \
+              --size-only
+            echo "✅ 已check"
 
   # 定时任务配置
   "crontab: 0 2 */7 * *":  # 每7天凌晨2点执行

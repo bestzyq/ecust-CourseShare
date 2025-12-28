@@ -13,11 +13,37 @@ $:
         - vscode
         - docker
 
-name: Sync
 master:
+  push:
+    - name: sync to github
+      runner:
+        cpus: 1
+      imports: https://cnb.cool/bestzyq/key/-/blob/main/env.yml
+      stages:
+        - name: Check Conflict & Push
+          script: |
+            git config --global user.name "$GITHUB_USERNAME"
+            git config --global user.email "$MAIL"
+            git remote add github https://$GITHUB_USERNAME:$GITHUB_ACCESS_TOKEN@github.com/bestzyq/ecust-CourseShare.git
+            
+            echo "🔍 1. 获取 GitHub 最新状态..."
+            git fetch github master
+            
+            if ! git pull --rebase github master; then
+              echo "❌ 冲突检测：GitHub 上有与本地冲突的修改！"
+              echo "⚠️ 请先手动在本地解决冲突，或者在 GitHub 上解决后再尝试。"
+              exit 1 # 退出脚本，防止错误推送
+            fi
+            
+            echo "✅ 合并成功（或者无冲突），准备推送..."
+
+            # --- 推送 ---
+            git push github master
+            echo "🚀 已成功同步到 GitHub"
+
   # 定时任务配置
   "crontab: 0 2 */7 * *":  # 每7天凌晨2点执行
-    - name: sync
+    - name: sync from github
       runner:
         cpus: 1
       imports:
@@ -25,12 +51,16 @@ master:
       stages:
         - name: setup-git
           script: |
-            git remote add upstream https://github.com/tianyilt/ecust-CourseShare.git
-            git fetch upstream
-            git checkout master
-            git reset --hard upstream/master
-            git push origin master --force
-            echo "✅ 已同步 GitHub 的 master 分支到 cnb.cool 仓库"
+            git remote add upstream https://github.com/bestzyq/ecust-CourseShare.git
+            git fetch upstream master
+            if ! git pull --rebase upstream master; then
+               echo "⛔️ 自动合并失败，存在冲突，跳过本次更新。"
+               exit 1
+            fi
+
+            # 将合并后的最新状态更新到 cnb 仓库自身（如果 git pull 产生了变更）
+            git push origin master
+            echo "✅ GitHub 代码已同步到 cnb"
         
         - name: Check & Install Rclone
           script: |
@@ -98,7 +128,7 @@ master:
       stages:
         - name: setup-git
           script: |
-            git remote add upstream https://github.com/tianyilt/ecust-CourseShare.git
+            git remote add upstream https://github.com/bestzyq/ecust-CourseShare.git
             git fetch upstream
             git checkout master
             git reset --hard upstream/master

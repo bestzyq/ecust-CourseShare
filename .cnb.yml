@@ -52,15 +52,27 @@ master:
         - name: setup-git
           script: |
             git remote add upstream https://github.com/bestzyq/ecust-CourseShare.git
+            
+            # 1. 记录更新前的 Commit ID
+            BEFORE_SHA=$(git rev-parse HEAD)
+            
             git fetch upstream master
             if ! git pull --rebase upstream master; then
                echo "⛔️ 自动合并失败，存在冲突，跳过本次更新。"
                exit 1
             fi
 
-            # 将合并后的最新状态更新到 cnb 仓库自身（如果 git pull 产生了变更）
+            # 2. 记录更新后的 Commit ID
+            AFTER_SHA=$(git rev-parse HEAD)
+
+            # 3. 核心判断：如果无变更，直接退出 Pipeline
+            if [ "$BEFORE_SHA" == "$AFTER_SHA" ]; then
+                echo "😴 代码无变更，任务提前结束 (Exit 78)。"
+                exit 78
+            fi
+            
+            echo "✅ 检测到代码变更，将更新推送到 CNB 仓库并继续后续 WebDAV 同步..."
             git push origin master
-            echo "✅ GitHub 代码已同步到 cnb"
         
         - name: Check & Install Rclone
           script: |
